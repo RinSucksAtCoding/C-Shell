@@ -1,0 +1,7 @@
+.thumbnail/
+.Trash/
+*.tmp
+*.o
+*.out
+build/
+.vscode/
