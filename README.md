@@ -69,10 +69,10 @@ clang -Wall -Wextra -O2 c-shell.c -o c-shell
 Once inside `c-shell`, you can interact with it like a minimal UNIX prompt.
 
 ```text
-$ ~ | C-Shell > ls -lh
-$ ~ | C-Shell > find -type f | wc -l > file_counter.log
-$ ~ | C-Shell > history
-$ ~ | C-Shell > exit
+$ home | C-Shell > ls -lh
+$ home | C-Shell > find -type f | wc -l > file_counter.log
+$ home | C-Shell > history
+$ home | C-Shell > exit
 ```
 
 ## Contributing
