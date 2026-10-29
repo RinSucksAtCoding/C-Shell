@@ -1,32 +1,29 @@
 # C-Shell
 
-[![C Standard](https://shields.io)](https://wikipedia.org/wiki/C_(programming_language))
-[![Platform](https://shields.io)]
-[![Footprint](https://shields.io)]
+> [!Note]
+> This project is entirely vibe-coded for fun. **It is NOT meant to replace Bash, Zsh, or Fish.**
 
-> A lightweight Linux shell mimic vibe-coded using Acodd, compiled and run directly inside Termux
+## About
 
-## ⚠️ Disclaimer & Project Scope
-
-This project is an experimental C-based shell mimic. **It is NOT meant to replace Bash, Zsh, or Fish.** It was built to explore low-level system calls, process creation, and file descriptor manipulation on mobile environments.
+C-Shell is a shell script made entirely in C using [Acode](https://github.com/Acode-Foundation/Acode).
 
 ## Features
 
-- **Ultralight Footprint:** Compiles down to a tiny binary (~8.3 KB).
 - **I/O Redirection:** Supports standard input/output redirection (`>`, `<`).
 - **Piping:** Allows basic command piping (`|`) to chain UNIX programs.
+- **Operators:** Allows commands to execute only if the last one succeeds (`&&`), or fails (`||`).
 - **History Checking:** Tracks previously executed commands during the active session.
 
 ## 🚧 Roadblocked Features (Unavailable Due to Bugs)
 
-To preserve system stability and keep the footprint small, the following features are **completely absent from the source code** until structural pointer bugs are resolved:
+To preserve system stability, the following features are **completely absent from the source code** until structural pointer bugs are resolved:
 
 - **No Alias Support:** Implementing string replacement for command aliases triggered severe **Segmentation Faults (core dumped)** during tokenization. The feature has been completely left out.
 - **No Configuration File:** A startup configuration file (proposed as `.cshellrc` to store future aliases and custom prompts) is currently unavailable, as it relies heavily on the broken alias/string-parsing subsystem.
 
 ## 🛠️ Under the Hood: Technical Architecture
 
-Despite its ~8.3 KB size, `c-shell.c` interacts directly with the Linux kernel via POSIX system calls:
+`c-shell.c` interacts directly with the Linux kernel via POSIX system calls:
 
 ### 1. Piping & Redirection Mechanics
 Inter-process communication (IPC) for commands like `cat file.txt | grep "test"` is managed manually:
@@ -44,18 +41,14 @@ The `history` command reads from an internal command array structured as a seque
 
 ### Prerequisites
 
-You need an Android device running **Termux** with the `clang` package installed.
+- Termux should be installed.
+- `clang` should be installed. If not installed already (confirm by running `clang --version`), do so by running `pkg install clang`.
+- Either `curl` or `wget` should be installed.
 
-```bash
-pkg update && pkg upgrade
-pkg install clang
-```
+### Installation
 
-### Installation & Compilation
+Since this is a lightweight, zero-dependency script, no `Makefile` or `CMake` is required.
 
-Since this is a lightweight, zero-dependency script, no `Makefile` or `CMake` is required. You can compile the source file directly using `clang`:
-
-```bash
 # Clone or move your C file into your workspace
 # Compile directly with Clang
 clang -Wall -Wextra -O2 c-shell.c -o c-shell
