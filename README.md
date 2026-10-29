@@ -41,19 +41,29 @@ The `history` command reads from an internal command array structured as a seque
 
 ### Prerequisites
 
-- Termux should be installed.
-- `clang` should be installed. If not installed already (confirm by running `clang --version`), do so by running `pkg install clang`.
-- Either `curl` or `wget` should be installed.
+- Termux must be installed.
+- `clang` must be installed. If not installed already (confirm by running `clang --version`), do so by running `pkg install clang`.
+- Either `curl` or `wget` must be installed.
 
 ### Installation
 
 Since this is a lightweight, zero-dependency script, no `Makefile` or `CMake` is required.
 
-# Clone or move your C file into your workspace
-# Compile directly with Clang
-clang -Wall -Wextra -O2 c-shell.c -o c-shell
+### Step 1. Download the file
+| Method | Installation |
+| ------ | ------------ |
+| `curl` | `curl -L -O https://raw.githubusercontent.com/RinSucksAtCoding/C-Shell/refs/heads/main/c-shell.c` |
+| `wget` | `wget https://raw.githubusercontent.com/RinSucksAtCoding/C-Shell/refs/heads/main/c-shell.c` |
 
-# Run the shell
+### Step 2. Compile directly with Clang
+Run the following:
+```bash
+ clang -Wall -Wextra -O2 c-shell.c -o c-shell
+```
+
+### Step 3. Run the shell
+Run the following:
+```bash
 ./c-shell
 ```
 
