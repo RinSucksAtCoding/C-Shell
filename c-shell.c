@@ -8,39 +8,118 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <errno.h>
-
+#include <glob.h>
+#include <time.h>
 
 // Max command line limits
 #define MAX_LINE 1024
 #define MAX_ARGS 64
 #define MAX_HISTORY 100
+#define MAX_ALIASES 50
 
 // ANSI color codes
+#define COLOR_BLACK "\x1b[1;30m"
+#define COLOR_RED "\x1b[1;31m"
 #define COLOR_GREEN "\x1b[1;32m"
+#define COLOR_YELLOW "\x1b[1;33m"
+#define COLOR_BLUE "\x1b[1;34m"
+#define COLOR_MAGENTA "\x1b[1;35m"
 #define COLOR_CYAN "\x1b[1;36m"
+#define COLOR_WHITE "\x1b[1;37m"
 #define COLOR_RESET "\x1b[0m"
 
 // Set up command history
 char *history[MAX_HISTORY];
 int history_count = 0;
 
+// Set up aliases
+typedef struct {
+    char *name;
+    char *command;
+} Alias;
+
+Alias aliases[MAX_ALIASES];
+int alias_count = 0;
+
 volatile pid_t foreground_pid = 0;
+
+void print_prompt(void) {
+    char cwd[MAX_LINE];
+    if (getcwd(cwd, sizeof(cwd)) == NULL) strcpy(cwd, "unknown");
+
+    char *username = getenv("USER");
+    if (username == NULL) username = "user";
+
+    char hostname[128];
+    if (gethostname(hostname, sizeof(hostname)) != 0) {
+        strcpy(hostname, "localhost");
+    }
+
+    // Basename of current working directory (e.g. 'projects' instead of '/sdcard/projects')
+    char *pwd_base = strrchr(cwd, '/');
+    pwd_base = (pwd_base != NULL && *(pwd_base + 1) != '\0') ? pwd_base + 1 : cwd;
+
+    char *ps1 = getenv("PS1");
+    if (ps1 == NULL) {
+        // If PS1 is not set, fallback to this colorful, default prompt
+        printf("%sC-Shell%s as %s%s%s@%s%s%s in %s%s%s $ ",
+        COLOR_GREEN, COLOR_RESET,
+        COLOR_YELLOW, username, COLOR_RESET,
+        COLOR_GREEN, hostname, COLOR_RESET,
+        COLOR_CYAN, pwd_base, COLOR_RESET);
+    } else {
+        // Parse basic escape sequences in PS1
+        for (int i = 0; ps1[i] != '\0'; i++) {
+            if (ps1[i] == '\\' && ps1[i + 1] != '\0') {
+                i++;
+                switch (ps1[i]) {
+                    // System info escapes
+                    case 'u': printf("%s", username); break;
+                    case 'h': printf("%s", hostname); break;
+                    case 'w': printf("%s", cwd); break;
+                    case 'W': printf("%s", pwd_base); break;
+                    case 'n': printf("\n"); break;
+                    case '$': printf("$"); break;
+
+                    // Color & formatting shortcuts
+                    case 'e': printf("\x1b"); break; // Standard escape character
+                    case 'K': printf("%s", COLOR_BLACK);
+                    case 'R': printf("%s", COLOR_RED); break;
+                    case 'G': printf("%s", COLOR_GREEN); break;
+                    case 'Y': printf("%s", COLOR_YELLOW); break;
+                    case 'B': printf("%s", COLOR_BLUE); break;
+                    case 'M': printf("%s", COLOR_MAGENTA); break;
+                    case 'C': printf("%s", COLOR_CYAN); break;
+                    case 'H': printf("%s", COLOR_WHITE); break;
+                    case 'X': printf("%s", COLOR_RESET); break;
+
+                    default: putchar('\\'); putchar(ps1[i]); break;
+                }
+            } else {
+                putchar(ps1[i]);
+            }
+        }
+    }
+    fflush(stdout);
+}
+
+void handle_sigchld(int sig) {
+    (void)sig;
+
+    // Reap all dead background child processes without blocking
+    while (waitpid(-1, NULL, WNOHANG) > 0);
+}
 
 // Handle CTRL + C without crashing
 void handle_sigint(int sig) {
     (void)sig;
 
-    // If there's a foreground activity, kill it, otherwise just print a new line
+    // Kill the foreground activity if it exists, otherwise just print a new line
     if (foreground_pid > 0) {
         kill(foreground_pid, SIGINT);
     } else {
         printf("\n");
-        char cwd[MAX_LINE];
-        if (getcwd(cwd, sizeof(cwd)) == NULL) strcpy(cwd, "unknown");
-        char *pwd = strrchr(cwd, '/');
-        pwd = (pwd != NULL && *(pwd + 1) != '\0') ? pwd + 1 : cwd;
-        printf("$ %s%s%s | %sC-Shell%s > ", COLOR_CYAN, pwd, COLOR_RESET, COLOR_GREEN, COLOR_RESET);
-        fflush(stdout);
+        print_prompt();
     }
 }
 
@@ -72,6 +151,77 @@ void add_to_history(const char *cmd) {
 void print_history(void) {
     for (int i = 0; i < history_count; i++) {
         printf("%d: %s\n", i + 1, history[i]);
+    }
+}
+
+void load_history(void) {
+    char path[MAX_LINE];
+    char *home = getenv("HOME");
+    if (home == NULL) return;
+
+    snprintf(path, sizeof(path), "%s/.cshell_history", home);
+    FILE *file = fopen(path, "r");
+    if (file == NULL) return; // Safely ignore the history file if it doesn't exist yet
+
+    char line[MAX_LINE];
+    while (fgets(line, sizeof(line), file) != NULL) {
+        // Strip trailing newline
+        char *nl = strchr(line, '\n');
+        if (nl) *nl = '\0';
+
+        if (strlen(line) > 0) {
+            add_to_history(line);
+        }
+    }
+    fclose(file);
+}
+
+void save_history(void) {
+    char path[MAX_LINE];
+    char *home = getenv("HOME");
+    if (home == NULL) return;
+
+    snprintf(path, sizeof(path), "%s/.cshell_history", home);
+    FILE *file = fopen(path, "w");
+    if (file == NULL) return;
+
+    for (int i = 0; i < history_count; i++) {
+        fprintf(file, "%s\n", history[i]);
+    }
+
+    fclose(file);
+}
+
+void add_alias(const char *name, const char *command) {
+    // Check if alias already exists, update if so
+    for (int i = 0; i < alias_count; i++) {
+        if (strcmp(aliases[i].name, name) == 0) {
+            free(aliases[i].command);
+            aliases[i].command = strdup(command);
+            return;
+        }
+    }
+    if (alias_count < MAX_ALIASES) {
+        aliases[alias_count].name = strdup(name);
+        aliases[alias_count].command = strdup(command);
+        alias_count++;
+    }
+}
+
+const char *get_alias(const char *name) {
+    for (int i = 0; i < alias_count; i++) {
+        if (strcmp(aliases[i].name, name) == 0) {
+            return aliases[i].command;
+        }
+    }
+    return NULL;
+}
+
+// Free aliases on exit
+void free_aliases(void) {
+    for (int i = 0; i < alias_count; i++) {
+        free(aliases[i].name);
+        free(aliases[i].command);
     }
 }
 
@@ -142,7 +292,6 @@ int expand_env_vars(const char *input, char *output, size_t output_size) {
     return 0;
 }
 
-
 void strip_quotes(char *str) {
     int len = strlen(str);
     if (len >= 2 && ((str[0] == '"' && str[len - 1] == '"') || (str[0] == '\'' && str[len - 1] == '\''))) {
@@ -166,15 +315,32 @@ void execute_sub_command(char **args) {
         }
         else {
             strip_quotes(args[j]);
+
+            // --- WILDCARD / GLOBBING EXPANSION ---
+            if (strchr(args[j], '*') != NULL || strchr(args[j], '?') != NULL) {
+                glob_t glob_result;
+                // GLOB_NOCHECK keeps the pattern literal if no matching files are found
+                if (glob(args[j], GLOB_NOCHECK, NULL, &glob_result) == 0) {
+                    for (size_t g = 0; g < glob_result.gl_pathc; g++) {
+                        if (clean_count < MAX_ARGS - 1) {
+                            // Duplicate the string so it survives globfree()
+                            clean_args[clean_count++] = strdup(glob_result.gl_pathv[g]);
+                        }
+                    }
+                    globfree(&glob_result);
+                    continue;
+                }
+            }
+            // -------------------------------------
+
             clean_args[clean_count++] = args[j];
         }
     }
     clean_args[clean_count] = NULL;
 
-    if (clean_count == 0) exit(0);
-  
+    if (clean_count == 0) exit(0);      
+
     if (input_file != NULL) {
-        // Handle input redirection ('<')
         int fd_in = open(input_file, O_RDONLY);
         if (fd_in < 0) { perror("Input redirection failed"); exit(1); }
         if (dup2(fd_in, STDIN_FILENO) < 0) {
@@ -186,7 +352,6 @@ void execute_sub_command(char **args) {
     }
 
     if (output_file != NULL) {
-        // Handle output redirection ('>')
         int fd_out = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0666);
         if (fd_out < 0) { perror("Output redirection failed..."); exit(1); }
         if (dup2(fd_out, STDOUT_FILENO) < 0) {
@@ -197,21 +362,54 @@ void execute_sub_command(char **args) {
         close(fd_out);
     }
 
-    // Handle command execution
     execvp(clean_args[0], clean_args);
     perror(clean_args[0]);
     exit(1);
 }
 
+// Parses a command string into arguments while respecting single and double quotes
+int parse_arguments(char *str, char **args, int max_args) {
+    int count = 0;
+    int in_quotes = 0;
+    char quote_char = '\0';
+    char *p = str;
+
+    while (*p != '\0' && count < max_args - 1) {
+        // Skip leading spaces
+        while (*p == ' ' && !in_quotes) p++;
+        if (*p == '\0') break;
+
+        args[count++] = p; // Start of argument
+
+        while (*p != '\0') {
+            if (!in_quotes && (*p == '\'' || *p == '"')) {
+                in_quotes = 1;
+                quote_char = *p;
+                p++;
+            } else if (in_quotes && *p == quote_char) {
+                in_quotes = 0;
+                p++;
+            } else if (!in_quotes && *p == ' ') {
+                *p = '\0'; // Null-terminate the argument
+                p++;
+                break;
+            } else {
+                p++;
+            }
+        }
+    }
+    args[count] = NULL;
+    return count;
+}
+
 int run_pipeline(char *pipeline_str) {
     char *commands[MAX_ARGS];
     int num_cmds = 0;
-
     char *pipe_str_copy = strdup(pipeline_str);
     char *pipe_save = NULL;
     char *cmd_token = strtok_r(pipe_str_copy, "|", &pipe_save);
 
-    // Handle command piping ('|')
+    // 1. Split pipeline commands by '|'
     while (cmd_token != NULL && num_cmds < MAX_ARGS - 1) {
         commands[num_cmds++] = cmd_token;
         cmd_token = strtok_r(NULL, "|", &pipe_save);
@@ -221,29 +419,24 @@ int run_pipeline(char *pipeline_str) {
         free(pipe_str_copy);
         return 1;
     }
-
-    if (num_cmds == 0) {
-        free(pipe_str_copy);
-        return 0;
-    }
+    if (num_cmds == 0) { free(pipe_str_copy); return 0; }
     commands[num_cmds] = NULL;
 
-    // Handle spaces in command line
+    // Parse arguments for the first command in the pipeline
     char *first_args[MAX_ARGS];
-    char *temp_save = NULL;
     char temp_first[MAX_LINE];
     strcpy(temp_first, commands[0]);
-    int arg_idx = 0;
-    char *token = strtok_r(temp_first, " ", &temp_save);
-    while (token != NULL) {
-        first_args[arg_idx++] = token;
-        token = strtok_r(NULL, " ", &temp_save);
-    }
-    first_args[arg_idx] = NULL;
+    int arg_idx = parse_arguments(temp_first, first_args, MAX_ARGS);
 
     if (arg_idx == 0) { free(pipe_str_copy); return 0; }
 
-    if (strcmp(first_args[0], "exit") == 0) { printf("Goodbye!\n"); free(pipe_str_copy); exit(0); }
+    if (strcmp(first_args[0], "exit") == 0) {
+        save_history();
+        free_aliases();
+        printf("Goodbye!\n");
+        free(pipe_str_copy);
+        exit(0);
+    }
     if (strcmp(first_args[0], "history") == 0) { print_history(); free(pipe_str_copy); return 0; }
     if (strcmp(first_args[0], "cd") == 0) {
         char *target = (arg_idx > 1) ? first_args[1] : getenv("HOME");
@@ -258,6 +451,80 @@ int run_pipeline(char *pipeline_str) {
         if (chdir(target) != 0) { perror("cd"); ret = 1; }
         free(pipe_str_copy);
         return ret;
+    }
+    if (strcmp(first_args[0], "pwd") == 0) {
+        char cwd[MAX_LINE];
+        if (getcwd(cwd, sizeof(cwd)) != NULL) {
+            printf("%s\n", cwd);
+        } else {
+            perror("pwd");
+        }
+        free(pipe_str_copy);
+        return 0;
+    }
+    if (strcmp(first_args[0], "alias") == 0) {
+        if (arg_idx == 1) {
+            // Print all registered aliases
+            for (int i = 0; i < alias_count; i++) {
+                printf("alias %s='%s'\n", aliases[i].name, aliases[i].command);
+            }
+        } else {
+            // Reconstruct the raw argument string after 'alias'
+            char full_arg[MAX_LINE] = "";
+            for (int k = 1; k < arg_idx; k++) {
+                strcat(full_arg, first_args[k]);
+                if (k < arg_idx - 1) strcat(full_arg, " ");
+            }
+
+            char *eq = strchr(full_arg, '=');
+            if (eq != NULL) {
+                *eq = '\0';
+                char name[MAX_LINE];
+                char cmd[MAX_LINE];
+                strcpy(name, full_arg);
+                strcpy(cmd, eq + 1);
+
+                strip_quotes(name);
+                strip_quotes(cmd); // Strips outer quotes cleanly (e.g. 'ls -A' -> ls -A)
+
+                add_alias(name, cmd);
+            } else {
+                fprintf(stderr, "alias: usage: alias name='command'\n");
+            }
+        }
+        free(pipe_str_copy);
+        return 0;
+    }
+    if (strcmp(first_args[0], "export") == 0) {
+        if (arg_idx < 2) {
+            fprintf(stderr, "export: usage: export KEY=VALUE\n");
+        } else {
+            // Reconstruct the full argument string in case of spaces
+            char full_arg[MAX_LINE] = "";
+            for (int k = 1; k < arg_idx; k++) {
+                strcat(full_arg, first_args[k]);
+                if (k < arg_idx - 1) strcat(full_arg, " ");
+            }
+
+            char *eq = strchr(full_arg, '=');
+            if (eq != NULL) {
+                *eq = '\0';
+                char name[MAX_LINE];
+                char value[MAX_LINE];
+                strcpy(name, full_arg);
+                strcpy(value, eq + 1);
+
+                strip_quotes(name);
+                strip_quotes(value);
+
+                // Set the environment variable [1 = overwrite if it already exists]
+                if (setenv(name, value, 1) != 0) perror("export");
+            } else {
+                fprintf(stderr, "export: usage: export KEY=VALUE\n");
+            }
+        }
+        free(pipe_str_copy);
+        return 0;
     }
 
     int pipefds[2 * (MAX_ARGS - 1)];
@@ -275,6 +542,19 @@ int run_pipeline(char *pipeline_str) {
         }
     }
 
+    int is_background = 0;
+
+    char last_cmd_copy[MAX_LINE];
+    strcpy(last_cmd_copy, commands[num_cmds - 1]);
+    char *last_args[MAX_ARGS];
+    int last_arg_count = parse_arguments(last_cmd_copy, last_args, MAX_ARGS);
+
+    if (last_arg_count > 0 && strcmp(last_args[last_arg_count - 1], "&") == 0) {
+        is_background = 1;
+        // Strip the '&' character from the actual command string
+        char *amp = strchr(commands[num_cmds - 1], '&');
+        if (amp) *amp = '\0';
+    }
 
     int last_status = 0;
     int fork_failed = 0;
@@ -296,14 +576,9 @@ int run_pipeline(char *pipeline_str) {
             for (int j = 0; j < 2 * (num_cmds - 1); j++) close(pipefds[j]);
 
             char *args[MAX_ARGS];
-            int k = 0;
-            char *arg_save = NULL;
-            char *arg_tok = strtok_r(commands[i], " ", &arg_save);
-            while (arg_tok != NULL) {
-                args[k++] = arg_tok; arg_tok = strtok_r(NULL, " ", &arg_save);
-            }
-            args[k] = NULL;
-
+            char cmd_copy[MAX_LINE];
+            strcpy(cmd_copy, commands[i]);
+            parse_arguments(cmd_copy, args, MAX_ARGS);
             execute_sub_command(args);
         } else if (pid < 0) {
             perror("fork");
@@ -318,21 +593,27 @@ int run_pipeline(char *pipeline_str) {
 
     if (fork_failed) {
         last_status = 1;
-    }
+    } else if (is_background) {
+        // -- BACKGROUND PROCESS --
+        printf("[Background PID: %d]\n", foreground_pid);
+        fflush(stdout);
+        // Do NOT block waiting for children; SIGCHLD will reap them later
+        last_status = 0;
+    } else {
+        for (int i = 0; i < num_cmds; i++) {
+            int status;
+            pid_t reaped;
+            do {
+                reaped = wait(&status);
+            } while (reaped < 0 && errno == EINTR);
 
-    for (int i = 0; i < num_cmds; i++) {
-        int status;
-        pid_t reaped;
-
-        do {
-            reaped = wait(&status);
-        } while (reaped < 0 && errno == EINTR);
-
-        if (reaped == foreground_pid) {
-            if (WIFEXITED(status)) last_status = WEXITSTATUS(status);
-            else last_status = 1;
+            if (reaped == foreground_pid) {
+                if (WIFEXITED(status)) last_status = WEXITSTATUS(status);
+                else last_status = 1;
+            }
         }
     }
+
     foreground_pid = 0;
     free(pipe_str_copy);
     return last_status;
@@ -340,10 +621,28 @@ int run_pipeline(char *pipeline_str) {
 
 int run_command_string(char *cmd_str) {
     char expanded_line[MAX_LINE];
-        
+
     if (expand_env_vars(cmd_str, expanded_line, sizeof(expanded_line)) != 0) {
         fprintf(stderr, "Expanded command is too long!\n");
         return 1;
+    }
+
+    // -- Check for alias expansion --
+    char alias_checked[MAX_LINE];
+    // Copy first word (command line)
+    char first_word[MAX_LINE];
+    int i = 0;
+    while (expanded_line[i] != ' ' && expanded_line[i] && i < MAX_LINE - 1) {
+        first_word[i] = expanded_line[i];
+        i++;
+    }
+    first_word[i] = '\0';
+
+    const char *alias_cmd = get_alias(first_word);
+    if (alias_cmd != NULL) {
+        // Replace alias with its full command value + its remaining arguments
+        snprintf(alias_checked, sizeof(alias_checked), "%s%s", alias_cmd, expanded_line + i);
+        strcpy(expanded_line, alias_checked);
     }
 
     char *pipelines[MAX_ARGS];
@@ -395,24 +694,57 @@ int run_command_string(char *cmd_str) {
     return status;
 }
 
+void load_config(void) {
+    char path[MAX_LINE];
+    char *home = getenv("HOME");
+    if (home == NULL) return;
+
+    snprintf(path, sizeof(path), "%s/.cshellrc", home);
+    FILE *file = fopen(path, "r");
+    if (file == NULL) return; // Safely ignore the configuration file if it does not exist
+
+    char line[MAX_LINE];
+    while (fgets(line, sizeof(line), file) != NULL) {
+        // Strip trailing newline
+        char *nl = strchr(line, '\n');
+        if (nl) *nl = '\0';
+
+        // Skip comments or empty lines
+        if (line[0] == '#' || strlen(line) == 0) continue;
+
+        // Execute each line as if it were typed into the shell
+        run_command_string(line);
+    }
+    fclose(file);
+}
+              
 int main(void) {
+    // Ensure Termux binaries (like curl, micro, etc.) and Android system binaries are in PATH
+    char *current_path = getenv("PATH");
+    char new_path[MAX_LINE];
+
+    if (current_path != NULL) {
+        snprintf(new_path, sizeof(new_path), "%s:/data/data/com.termux/files/usr/bin:/system/bin", current_path);
+    } else {
+        snprintf(new_path, sizeof(new_path), "/data/data/com.termux/files/usr/bin:/system/bin");
+    }
+    setenv("PATH", new_path, 1);
+
     char raw_line[MAX_LINE];
     char working_line[MAX_LINE];
 
+    load_config(); // Load user aliases/config
+    load_history(); // Load past command history
     signal(SIGINT, handle_sigint);
+    signal(SIGCHLD, handle_sigchld);
 
     while (1) {
-        char cwd[MAX_LINE];
-        if (getcwd(cwd, sizeof(cwd)) == NULL) strcpy(cwd, "unknown");
-        // Generates the user's current directory
-        char *pwd = strrchr(cwd, '/');
-        pwd = (pwd != NULL && *(pwd + 1) != '\0') ? pwd + 1 : cwd;
-        // Generates a command line prompt
-        printf("$ %s%s%s | %sC-Shell%s > ", COLOR_CYAN, pwd, COLOR_RESET, COLOR_GREEN, COLOR_RESET);
-        fflush(stdout);
+        // Print the customizable prompt
+        print_prompt();
 
         // Handle CTRL + D and exit shsll
         if (fgets(raw_line, sizeof(raw_line), stdin) == NULL) {
+            save_history();
             printf("\nExiting...\n");
             break;
         }
@@ -436,11 +768,27 @@ int main(void) {
         }
 
         if (strlen(raw_line) == 0) continue;
-
         strcpy(working_line, raw_line);
 
-        // Only add commands that succeeded to history
+        // 1. Start the timer RIGHT BEFORE running a command
+        struct timespec start_time, end_time;
+        clock_gettime(CLOCK_MONOTONIC, &start_time);
+
         int status = run_command_string(working_line);
+
+        // 2. Stop the timer RIGHT AFTER the command finishes
+        clock_gettime(CLOCK_MONOTONIC, &end_time);
+
+        // Calculate elapsed time in seconds
+        double elapsed = (end_time.tv_sec - start_time.tv_sec) +
+                         (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
+
+        // Print if it took longer than 0.1 second
+        if (elapsed > 0.5) {
+            printf("\033[33m[took %.3fs]\033[0m\n", elapsed);
+        }
+
+        // Add the command to history only if it SUCCEEDED
         if (status == 0) {
             add_to_history(raw_line);
         }
@@ -448,6 +796,6 @@ int main(void) {
 
     // Clear all history after exiting
     for (int i = 0; i < history_count; i++) free(history[i]);
-
+    free_aliases();
     return 0;
 }

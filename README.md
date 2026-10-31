@@ -5,79 +5,63 @@
 
 ## About
 
-C-Shell is a shell script made entirely in C using [Acode](https://github.com/Acode-Foundation/Acode).
+C-Shell is a lightweight, feature-rich, POSIX-compliant command-line shell script written in native C using [Acode](https://github.com/Acode-Foundation/Acode).
 
-## Features
+## ✨ Features
 
-- **I/O Redirection:** Supports standard input/output redirection (`>`, `<`).
-- **Piping:** Allows basic command piping (`|`) to chain UNIX programs.
-- **Operators:** Allows commands to execute only if the last one succeeds (`&&`), or fails (`||`).
-- **History Checking:** Tracks previously executed commands during the active session.
+- **I/O Redirection:** Handle input/output redirection with either `>`, `<`, or `>>`.
+- **Piping:** Chain commands with pipes (`|`).
+- **Logical Operators:** Execute a command only if the last one succeeds (`&&`), or fails (`||`).
+- **History Checking:** Track previously executed commands and save them to `.cshell_history`.
+- **Background Execution:** Run commands asynchronously with `&`, and automatically kills zombie processes (`SIGCHLD`).
+- **Custom Aliases:** Define shortcuts with `alias` to save time (e.g. `alias la='ls -a'`).
+- **Environment Management:** Modify environment variables with `export` and expand them right away (`$TEXT`)
+- **Wildcard Globbing:** Full support for pattern matching (`*`).
+- **Startup Configuration:** Automatically execute commands on startup with `.cshellrc`.
+- **PS1 Customization::** Style your prompt with custom text, modules (`\u`, `\W`), and color codes.
+- **Execution Timing:** Measure elapsed time for commands taking longer than 0.5 seconds.
 
-## 🚧 Roadblocked Features (Unavailable Due to Bugs)
+## ✅ Getting Started
 
-To preserve system stability, the following features are **completely absent from the source code** until structural pointer bugs are resolved:
+### Prerequisite
 
-- **No Alias Support:** Implementing string replacement for command aliases triggered severe **Segmentation Faults (core dumped)** during tokenization. The feature has been completely left out.
-- **No Configuration File:** A startup configuration file (proposed as `.cshellrc` to store future aliases and custom prompts) is currently unavailable, as it relies heavily on the broken alias/string-parsing subsystem.
-
-## 🛠️ Under the Hood: Technical Architecture
-
-`c-shell.c` interacts directly with the Linux kernel via POSIX system calls:
-
-### 1. Piping & Redirection Mechanics
-Inter-process communication (IPC) for commands like `cat file.txt | grep "test"` is managed manually:
-- **`pipe(pipefds)`:** Instantiates a unidirectional data channel with a read and write file descriptor.
-- **`fork()`:** Spawns distinct child processes for each side of the pipeline.
-- **`dup2()`:** Rearranges file descriptors. It duplicates the pipe's write-end over standard output (`STDOUT_FILENO`) for the producer, and the read-end over standard input (`STDIN_FILENO`) for the consumer.
-- **`execvp()`:** Mutates the child process images into the targeted system binaries.
-
-### 2. Session History Architecture
-The `history` command reads from an internal command array structured as a sequential tracking log:
-- **Active Session Bounds:** The shell tracks the last **100 commands** (depending on stack optimization limits) executed within the running instance.
-- **Volatile Execution:** Because configuration parsing is locked out, history is strictly stored in heap/stack memory and clears completely upon typing `exit`.
-
-## Getting Started
-
-### Prerequisites
-
-- Termux must be installed.
-- `clang` must be installed. If not installed already (confirm by running `clang --version`), do so by running `pkg install clang`.
-- Either `curl` or `wget` must be installed.
-
-### Installation
-
-Since this is a lightweight, zero-dependency script, no `Makefile` or `CMake` is required.
-
-### Step 1. Download the file
-| Method | Installation |
-| ------ | ------------ |
-| `curl` | `curl -L -O https://raw.githubusercontent.com/RinSucksAtCoding/C-Shell/refs/heads/main/c-shell.c` |
-| `wget` | `wget https://raw.githubusercontent.com/RinSucksAtCoding/C-Shell/refs/heads/main/c-shell.c` |
-
-### Step 2. Compile directly with Clang
-Run the following:
+A standard C compiler (either `clang` or `gcc`) must be installed. If not already (confirm by running `clang --version`), assuming you're on Termux:
 ```bash
- clang -Wall -Wextra -O2 c-shell.c -o c-shell
+pkg update
+pkg install clang
 ```
 
-### Step 3. Run the shell
-Run the following:
+### 📥 Installation
+
+### Step 1.
+Clone the repository and compile the source code:
+```bash
+git clone https://github.com/RinSucksAtCoding/C-Shell.git
+cd C-Shell
+clang c-shell.c -o c-shell
+```
+
+### Step 2.
+Run your new shell:
 ```bash
 ./c-shell
 ```
 
-## Usage & Syntax
+## ⚙️ Configuration
+C-Shell looks for a configuration file (`~/.cshellrc`) on startup. You can use it to set up custom aliases, environment variables, and your custom prompt format.
 
-Once inside `c-shell`, you can interact with it like a minimal UNIX prompt.
+## Example:
+```bash
+alias la='ls -a'
+alias weather='curl wttr.in'
 
-```text
-$ home | C-Shell > ls -lh
-$ home | C-Shell > find -type f | wc -l > file_counter.log
-$ home | C-Shell > history
-$ home | C-Shell > exit
+export EDITOR='nano'
+export PS1="\Y\u\X@\G\h\X in \C\w\X$ "
 ```
 
-## Contributing
+### 🤝 Contributing
 
-Want to help unpack the memory bugs? Pull requests are highly welcome! We are actively looking for a robust, lightweight string-tokenization function that can safely parse config text and swap alias strings without overflowing bounds or causing segmentation faults.
+Contributions, bug reports, and suggestions are welcome! Get started by checking [CONTRIBUTING.md](CONTRIBUTING.md)!
+
+### ©️ License
+Distributed under the MIT license. See [LICENSE](LICENSE) for more information.

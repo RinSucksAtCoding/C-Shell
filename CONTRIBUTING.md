@@ -1,33 +1,60 @@
-### Contributing to C-Shell
+# Contributing to C-Shell
 
-First off, thank you for taking the time to contribute! This project is a lightweight exploration of low-level systems programming in C, coded entirely on mobile devices. 
+First off, thankk you for taking the time to contribute! Whether it's fixing a bug, adding a new built-in command, or improving documentation, every contribution makes this project better.
 
-### The Core Challenge: Squash the Bug!
+Please review this guide to make your contribution process smooth and effective.
 
-My primary roadmap goal is implementing **Alias Support** and a **`.cshellrc` Configuration File Parser**. 
+---
 
-Currently, these features are omitted from the codebase because my early string parsing attempts triggered severe **Segmentation Faults (core dumped)** during command tokenization. 
+## ✅ Getting Started
 
-### What I Need Help With:
-
-* A memory-safe, lightweight string tracking or hashing mechanism.
-* A robust text evaluation routine that can substitute an alias string (e.g., swapping `ll` out for `ls -lh`) within the input buffer *before* passing tokens to `execvp`.
-* Bound-checking logic that keeps our compiled binary size near the ~8.3 KB limit.
-
-### Development Workflow
-
-Because this tool is built for mobile ecosystems, I prefer verification inside the target environment: 
-
-1. **Environment:** Test your fixes directly inside **Termux** on Android using `clang`.
-2. **Coding Style:** Keep it clean, standard C99/C11, utilizing native POSIX system calls. Avoid adding massive external third-party dependencies to keep the binary small.
-3. **Compilation Check:** Always verify your changes compile cleanly without throwing new memory leak hazards: 
-
+1. **Fork the Repository** and clone your fork locally:
 ```bash
-clang -Wall -Wextra -O2 c-shell.c -o c-shell
+git clone https://github.com/RinSucksAtCoding/C-Shell.git
+cd C-Shell
 ```
 
-### Submitting Pull Requests
+2. **Set up your environment**
+Ensure you have either `clang` or `gcc` installed.
 
-1. Fork the repository and create your feature branch (`git checkout -b feature/squash-alias-bug`).
-2. Commit your changes with a clear message explaining how you managed the pointers or array indices safely.
-3. Push to the branch and open a Pull Request!
+3. **Create a new branch for your feature or bug fix:
+```bash
+git checkout -b feature/your-feature-here
+```
+
+## 🛠️ How to Add a New Built-In Command
+
+If you want to add a built-in command, follow these steps:
+1. **Handle the command inside `run_pipeline()`** before the pipe/fork executes:
+```C
+if (strcmp(first_args[0], "mycmd") == 0) {
+    // Your command goes here
+    free(pipe_str_copy);
+    return 0;
+}
+```
+2. **Manage memory responsibly ** Make sure you free any temporary buffers, strings, or copy pointers before returning to prevent memory leaks.
+3. **Test it thoroughly** both directly in the terminal and inside a `.cshellrc` startup script or pipeline.
+
+## 💻 Code Style Guidelines
+
+* **Language Standard:** Written in clean, readable **C99**.
+* **Memory Safety ** Always check for `NULL` pointers after `malloc`, `strdup`, or `getenv`. Free dynamically allocated memory when it's no longer needed (especially in alias management, history tracking, and argument parsing).
+* **Readability:** Keep functions modular, comment complex parsing or piping logic, and use meaningful variable names.
+
+## 🐞 Reporting Bugs & Issues
+
+If you encounter a bug (e.g., pipe deadlocks, quote parsing edge cases, memory leaks), please open an issue on GitHub with:
+* A clear description of what the bug does.
+* Steps to reproduce it.
+* Your environment details (OS, Termux version, Clang/GCC version).
+
+## Pull Request Process
+
+1. Compile and test your changes locally to ensure there are no compilation warnings or runtime crashes:
+```bash
+clang c-shell.c -o c-shell -lreadline
+./c-shell
+```
+2. Push your branch and open a **Pull Request** targeting the `main` branch.
+3. Provide a clear summary of what your PR changes and why it's useful.
